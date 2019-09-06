@@ -39,15 +39,54 @@ import org.bukkit.util.Vector;
  * I have left comments willy nilly. I don't really have any standards here.
  * If you have any questions, add me on Discord @TheTealViper#2424 and feel
  * free to ask :). (Do note I am very busy with school atm, however).
+ * 
+ * There are three main functional parts to this plugin. I will provide more
+ * in depth comments in the code itself, but here is an overveiw of the means
+ * of achieving the intended goals of each of the functional parts.
+ * 1. Handling the portal gun
+ * 2. Creating the portals
+ * 3. Handling teleportation
+ * 
+ * 1. Create a custom item. I could have used a vanilla item but that is so
+ * boring I would die. To do this, I used photoshop to make the .png texture of
+ * the model and blockbench for format the .json model itself. If you don't know
+ * what that means, this is a plugin tutorial not a texturing tutorial don't
+ * worry about it. Just use the texture pack I give you blablabla. So now that
+ * I've skipped a super crucial yet out-of-scope part of this tutorial and we
+ * have created the item, we need to give it to a player. If you are making a
+ * plugin surely you will have a truly functional way in mind of how to do this
+ * alas each plugin will handle this differently so for the tutorial I simply
+ * made typing "portalgun" in chat give you the gun. That's the front end
+ * experience of giving a gun but how do we ACTUALLY in the backend give a player
+ * a custom textured item? There are two ways. One utilizes the damage values of
+ * tools (which I don't like) and the other is using a custom tag in the item's
+ * meta. Both of these rely on backend resource pack stuff which I'm not covering
+ * so sorry but not sorry I'm lazy. Now that we have done all the backend meta
+ * tag stuff, we simply give them the item and apply the tag the itemstack's meta.
+ * Tada custom portal gun. We also override the left and right clicks to do stuff.
+ * That requires a lot of math so refer to the actual code for that. Long story
+ * short we are raytracing baby. 
+ * 
+ * 2. Boom they have left/right clicked and we raytraced that bitch and we know
+ * EXACTLY where to make the portal... how do we do it? That involves a lot MORE
+ * math. Linear Algebra to be exact. If you're in college and you're thinking
+ * "should I take linear algebra?" you 100% should if you're doing computer
+ * science as a hobby let alone a major. Long story short, each portal will be
+ * created in the world out of particles and will need it's own relative coordinate 
+ * axes as the velocity of the player entering the portals will have to be conserved.
+ * If you are entering a portal upwards relative to it's position, you will want to
+ * continue upwards relative to the portal you pop out of. That's just showbiz baby.
+ * 
+ * 3. The player needs to teleport when they walk into the portal or this whole
+ * project is a bust. This, believe it or not, takes more math. Check the code.
  */
 
-public class PortalTest extends JavaPlugin implements Listener{
+public class PortalTest extends JavaPlugin implements Listener {
 	public static double DEFAULT_X_RADIUS = .5d, DEFAULT_Y_RADIUS = 1d, 
 			DEFAULT_ANGLE_SEGMENTS = 20, DEFAULT_RADIAL_SEGMENTS = 4;
 	public static Plugin plugin;
 	public static Map<Player, Long> cooldownMap = new HashMap<Player, Long>();
 	public static List<Player> pendingCancelDamage = new ArrayList<Player>();
-	
 	
 	private Map<Player, PlayerPortal> leftPortalMap = new HashMap<Player, PlayerPortal>();
 	private Map<Player, PlayerPortal> rightPortalMap = new HashMap<Player, PlayerPortal>();

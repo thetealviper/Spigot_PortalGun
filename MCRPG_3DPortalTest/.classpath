@@ -6,12 +6,12 @@
 			<attribute name="module" value="true"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="C:/Users/dahau/Desktop/Wynncraft Clone/spigot.jar">
+	<classpathentry kind="lib" path="HolographicDisplays-2.3.3-SNAPSHOT.jar">
 		<attributes>
 			<attribute name="module" value="true"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="C:/Users/dahau/Desktop/Wynncraft Clone/HolographicDisplaysAPI-2.3.3-SNAPSHOT.jar">
+	<classpathentry kind="lib" path="spigot-1.14.4.jar">
 		<attributes>
 			<attribute name="module" value="true"/>
 		</attributes>
