@@ -12,14 +12,33 @@ import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
 public class PlayerPortal {
+	/*
+	 * Some may say hey Aaron isn't the normal vector the same as zDir to which I say
+	 * shutthefuckupletmedomything
+	 */
 	public Vector normal;
+	/*
+	 * The center location is the center of the portal believe it or not
+	 */
 	public Location center;
+	/*
+	 * This is the player who owns the portal. This can have many utilities in an actual application
+	 * of this plugin
+	 */
 	public Player p;
+	/*
+	 * This is where the task which is begun in the onEnable() code gets it's locations from to spawn
+	 * particles.
+	 */
 	public List<Location> particleLocList = new ArrayList<Location>();
-	public List<Location> teleportLocList = new ArrayList<Location>(); //This list will contain all the points to check distance from to see if teleporting
+	/*
+	 * These are unit vectors indicating the portals relative coordinate system
+	 */
 	Vector xDir, yDir, zDir;
 	
-	private static List<Location> badLocs = new ArrayList<Location>();
+	/*
+	 * This is just a random thing for the debug. Not necessary at all. Junk code.
+	 */
 	private static List<Location> goodLocs = new ArrayList<Location>();
 	
 	public PlayerPortal(Player p, Vector normal, Location center) {
@@ -30,6 +49,23 @@ public class PlayerPortal {
 	}
 	
 	public void updatePoints() {
+		/*
+		 * Here is where the points are determined for the portal. Much like the raytracing, there is some significant math
+		 * going on here which you don't want lagging your server so you start it on a separate thread. There are no async
+		 * issues so don't worry about it. Basically, for each particle location, we determine it with the equation of an
+		 * oval. How it's going to work is imagine an empty oval. What we will do is draw a few evenly spaced points from
+		 * the center to the rightmost edge of oval. Then, we will rotate a bit around the oval and place the same amount
+		 * of equally spaced points again. Rotate a bit more, place, etc. Continue this until you've rotated around the entire
+		 * oval. Tada, that's how you get an oval. The variable t gives the angle increment and the variable r gives the amount
+		 * of equally spaced points I was talking about. If the angle increment is smaller and the amount of equally spaced particles
+		 * is greater, then the oval is filled in more and more. This lags a lot, however, and will actually immediately crash
+		 * clients if they ever render more than 4000 particles at once. This is a good balance that I found. Alter numbers as
+		 * you see fit. There is a bit of code that transforms the oval particle locations from portal space to world space
+		 * but if you don't know linear algebra I can't explain it to you. Also, I know I have a lot of repetitive code in
+		 * my scalar multiplication but it's because spigot's vector scalar multiplication function wasn't working as intended for me so I had to
+		 * manually do everything the long way.
+		 */
+		
 		Thread thread = new Thread(new Runnable() {public void run() {
 			particleLocList.add(center);
 			yDir = vectorsEqual(normal, new Vector(0,1,0)) || vectorsEqual(normal, new Vector(0,-1,0)) ? p.getLocation().getDirection().clone().setY(0).normalize() : new Vector(0,1,0);
@@ -45,11 +81,6 @@ public class PlayerPortal {
 					Vector zDirShift = new Vector(zDir.getX() * z, zDir.getY() * z, zDir.getZ() * z);
 					Vector shift = new Vector(xDirShift.getX() + yDirShift.getX() + zDirShift.getX(), xDirShift.getY() + yDirShift.getY() + zDirShift.getY(), xDirShift.getZ() + yDirShift.getZ() + zDirShift.getZ());
 					particleLocList.add(center.clone().add(shift));
-					
-					//If r is at the magical spots to check for teleporting, 0, pi/2, pi, 3pi/2, and center
-					if(r == 0 ) {//|| (r == PortalTest.DEFAULT_RADIAL_SEGMENTS - 1 && t % PortalTest.DEFAULT_ANGLE_SEGMENTS / 4d == 0)) {
-						teleportLocList.add(center.clone().add(shift));
-					}
 				}
 			}
 		}});
@@ -57,6 +88,11 @@ public class PlayerPortal {
 	}
 	
 	public static void teleport(Player p, Vector velocity, PlayerPortal from, PlayerPortal to) {
+		/*
+		 * This code really isn't too interesting. It takes the player, teleports them to the new portal, and then converts their velocity
+		 * relative to the old portal into a velocity relative to the new portal and then converts that to worldspace velocity.
+		 */
+		
 		PortalTest.pendingCancelDamage.add(p);
 		
 		double multiplier = .4; //This is for vertical portals. If they are horizontal use the next if condition.
@@ -76,6 +112,10 @@ public class PlayerPortal {
 	}
 	
 	public static boolean vectorsEqual(Vector v1, Vector v2) {
+		/*
+		 * This function was just necessary. No explanation needed.
+		 */
+		
 		if(v1.getX() != v2.getX())
 			return false;
 		if(v1.getY() != v2.getY())
@@ -86,6 +126,12 @@ public class PlayerPortal {
 	}
 	
 	public boolean inEllipse_BROKENFUNCTION(Location loc) {
+		/*
+		 * This is dead code and remnants of my first attempt to do portal hit detection. If you want to know how NOT to do it
+		 * this is how you don't do it because the teleport radius is just wayyy too far from the portal itself. You're being teleported
+		 * by walking into thin air man. Sucks ass. Don't use this.
+		 */
+		
 		double numerator1 = Math.pow(loc.getX() - center.getX(), 2);
 		double denominator1 = Math.pow(PortalTest.DEFAULT_X_RADIUS, 2);
 		
@@ -101,8 +147,18 @@ public class PlayerPortal {
 			return false;
 	}
 	
+	/*
+	 * Iteration distance is used as a raycast distance variable which takes an input of speed. Because the server only updates 20 tps, it is possible
+	 * that you have moved through a portal so fast that you go through it on your screen but the server will have completely missed it if you use a
+	 * static distance to raycast. So what I do is raycast a distance relative to your speed. .01 seemed to be a good balance. Don't question it.
+	 */
 	private static double iterationDistance = .01;
 	public boolean inEllipse(Vector velocity, Location loc) {
+		/*
+		 * This is basically a handoff function. To see if you're in the ellipse, we raycast to see if a distance x in front of you is "in" the portal.
+		 * This distance x varies from 0 to whatever maximum distance is provided by your speed times the iteration distance.
+		 */
+		
 		Vector v = velocity.clone().multiply(1); //A velocity with mag .2 should have a .1 gap to enter the portal so multiply velocity by .5 to set the ratio of 1 velocity : .5 blocks
 		Vector dir = velocity.clone().normalize();
 		int iterations = (int) (v.length() / iterationDistance);
@@ -116,6 +172,24 @@ public class PlayerPortal {
 	}
 	
 	private boolean inEllipse(Location loc) {
+		/*
+		 * Alright here is the big boy. Here we go man oof. So first off we need to understand some things. There is a
+		 * world coordinate system and a portal coordinate system. Each portal has it's up direction as a y coordinate,
+		 * rightward as an x, and an out of monitor toward you as a human z direction. For hit detection, we are first
+		 * checking if the player is in the oval with an unrestricted oval z value. This makes a cylindrical kinda shape
+		 * whose face is an ellipse rather than a circle if you were to imagine it in 3d view. So first we check if each
+		 * point from the raycast of the last inEllipse function is in the OVAL with unrestricted portal z axis. Then, we
+		 * check how far the z's are from eachother. I used .2 as the distance in either direction essentially giving a
+		 * buffer zone of .4 units. If we were to try to check if the player was ACTUALLY IN THE OVAL OF THE PORTAL, they
+		 * never would be. The coordinates are measured to like 16 decimal places. Do you honestly believe you can move so
+		 * precise that you stand perfectly at a decimal that looks like .0000000000000001 by choice?! Hell no. So you
+		 * give some buffer room. Technically we are teleporting them when they are NEAR the portal and not TECHNICALLY IN IT.
+		 * If you think this is cheating, you're wrong. It's the only way. You can mess with the buffer zone which I set to .2
+		 * but keep in mind the fact that if players are moving very fast, the packet updates to the server aren't really the
+		 * best. It is possible that they move so fast that they just teleport straight through even the buffer zone and don't
+		 * get teleported.
+		 */
+		
 		try {
 			Vector locationDeltaFromCenter = loc.clone().subtract(center).toVector();
 			double distanceFromCenterInDirection1AkaPortalY = locationDeltaFromCenter.clone().dot(yDir.clone());
@@ -142,6 +216,10 @@ public class PlayerPortal {
 	}
 	
 	public static void debugRaycast(Vector velocity, Location loc) {
+		/*
+		 * Quite frankly I don't feel like annotating this. It's just.... it doesn't matter. Junk code.
+		 */
+		
 		Vector v = velocity.clone().multiply(1); //A velocity with mag .2 should have a .1 gap to enter the portal so multiply velocity by .5 to set the ratio of 1 velocity : .5 blocks
 		Vector dir = velocity.clone().normalize();
 		int iterations = (int) (v.length() / iterationDistance);
@@ -151,9 +229,6 @@ public class PlayerPortal {
 		}
 		
 		Bukkit.getScheduler().scheduleSyncRepeatingTask(PortalTest.plugin, new Runnable() {public void run() {
-			for(Location loc : badLocs) {
-				loc.getWorld().spawnParticle(Particle.REDSTONE, loc, 0, new DustOptions(Color.RED, 1));
-			}
 			for(Location loc : goodLocs) {
 				loc.getWorld().spawnParticle(Particle.REDSTONE, loc, 0, new DustOptions(Color.GREEN, 1));
 			}
