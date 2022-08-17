@@ -33,6 +33,10 @@ public class PlayerPortal {
 	public List<Location> particleLocList = new ArrayList<Location>();
 	/*
 	 * These are unit vectors indicating the portals relative coordinate system
+	 * Imagining a portal existing vertically, facing towards you placed on a wall:
+	 * xDir is rightwards along the oval to the semi-minor axis (shorter end)
+	 * yDir is upwards along the oval to the semi-major axis (longer end)
+	 * zDir is out of the oval towards you, normal to the wall
 	 */
 	Vector xDir, yDir, zDir;
 	
@@ -69,7 +73,7 @@ public class PlayerPortal {
 		Thread thread = new Thread(new Runnable() {public void run() {
 			particleLocList.add(center);
 			yDir = vectorsEqual(normal, new Vector(0,1,0)) || vectorsEqual(normal, new Vector(0,-1,0)) ? p.getLocation().getDirection().clone().setY(0).normalize() : new Vector(0,1,0);
-			xDir = normal.clone().crossProduct(yDir.clone());
+			xDir = yDir.clone().crossProduct(normal.clone());
 			zDir = normal.clone();
 			for(double t = 0;t < PortalTest.DEFAULT_ANGLE_SEGMENTS;t++) {
 				for(int r = 0;r < PortalTest.DEFAULT_RADIAL_SEGMENTS;r++) {
@@ -90,25 +94,47 @@ public class PlayerPortal {
 	public static void teleport(Player p, Vector velocity, PlayerPortal from, PlayerPortal to) {
 		/*
 		 * This code really isn't too interesting. It takes the player, teleports them to the new portal, and then converts their velocity
-		 * relative to the old portal into a velocity relative to the new portal and then converts that to worldspace velocity.
+		 * relative to the worldspace -> old portal -> new portal -> and then converts that back to worldspace velocity.
 		 */
 		
 		PortalTest.pendingCancelDamage.add(p);
 		
+		//--------------
+		//Handle Location (anti-tp into wall) and Yaw Correction
+		//--------------
+		//Anti-Wall
 		double multiplier = .4; //This is for vertical portals. If they are horizontal use the next if condition.
+		double eyelineOffset = -(p.getEyeHeight() / 2d) - .1; //This is for horizontal portals. Teleporting players to the center teleports their FEET to the center which "floats" them. This is a hardcoded ghetto attempt at fixing.
 		if(vectorsEqual(to.normal, new Vector(0,-1,0))) { //If the portal is downwards, the multiplier grows so they teleport further down because their feet will spawn in the portal and their head will be in blocks
 			multiplier = 1.2;
+			eyelineOffset = 0d;
+		} else if(vectorsEqual(to.normal, new Vector(0,1,0))) {
+			eyelineOffset = 0d;
 		}
-		Location loc = to.center.clone().add(to.normal.clone().multiply(multiplier));
-		p.teleport(new Location(loc.getWorld(), loc.getX(), loc.getY(), loc.getZ(), p.getLocation().getYaw(), p.getLocation().getPitch()));
-		double xVelocity = velocity.clone().dot(from.xDir.clone());
-		double yVelocity = velocity.clone().dot(from.yDir.clone());
-		double zVelocity = velocity.clone().dot(from.zDir.clone()) * -1;
-		Vector xDummy = new Vector(to.xDir.getX() * xVelocity, to.xDir.getY() * xVelocity, to.xDir.getZ() * xVelocity);
-		Vector yDummy = new Vector(to.yDir.getX() * yVelocity, to.yDir.getY() * yVelocity, to.yDir.getZ() * yVelocity);
-		Vector zDummy = new Vector(to.zDir.getX() * zVelocity, to.zDir.getY() * zVelocity, to.zDir.getZ() * zVelocity);
-		Vector shift = new Vector(xDummy.getX() + yDummy.getX() + zDummy.getX(), xDummy.getY() + yDummy.getY() + zDummy.getY(), xDummy.getZ() + yDummy.getZ() + zDummy.getZ());
-		p.setVelocity(shift);
+		Location loc = to.center.clone().add(to.normal.clone().multiply(multiplier)).add(0, eyelineOffset, 0);
+		//Yaw Correction
+		//We convert ONCE from rad to deg here instead of twice within the getPortalYaw function.
+		// Also Math.PI is a double so we save the float cast until this step or we'd just do it multiple times for nothing.
+		// Also we add 180 because we want to come out the OPPOSITE direction faced when going in.
+		float yawDelta = (float) ((getPortalYaw_Rad(to.normal) - getPortalYaw_Rad(from.normal)) * 180f / Math.PI);
+		//If either portal is facing upwards or downwards, then we no longer care to rotate the player's yaw
+		if(vectorsEqual(from.normal, new Vector(0,1,0)) || vectorsEqual(from.normal, new Vector(0,-1,0)) || vectorsEqual(to.normal, new Vector(0,1,0)) || vectorsEqual(to.normal, new Vector(0,-1,0)))
+			yawDelta = 0f;
+		p.teleport(new Location(loc.getWorld(), loc.getX(), loc.getY(), loc.getZ(), p.getLocation().getYaw() + yawDelta, p.getLocation().getPitch()));
+		
+		//--------------
+		//Handle Velocity Transformation (Momentum "Conservation")
+		//--------------
+		//Velocity is currently in worldspace. We must convert relative to the "from portal" reference frame
+		Vector velocity_fromPortalRefFrame = convertWorldspaceToPortalVelocity(from.xDir, from.yDir, from.zDir, velocity);
+		//We INTENTIONALLY want to have the new portal velocity be the same as it was relative to the old portal but with the velocity INTO the "from" portal, reflected OUT OF the "to" portal.
+		// This is our definition of "conserving momentum"
+		Vector velocity_toPortalRefFrame = velocity_fromPortalRefFrame.clone();
+		velocity_toPortalRefFrame.setX(-velocity_toPortalRefFrame.getX());
+		velocity_toPortalRefFrame.setZ(-velocity_toPortalRefFrame.getZ());
+		//Now we must convert back to worldspace so we can set the player's velocity using Spigot's API
+		Vector conservedMomentumVelocity = convertPortalToWorldspaceVelocity(to.xDir, to.yDir, to.zDir, velocity_toPortalRefFrame);
+		p.setVelocity(conservedMomentumVelocity);
 	}
 	
 	public static boolean vectorsEqual(Vector v1, Vector v2) {
@@ -123,6 +149,137 @@ public class PlayerPortal {
 		if(v1.getZ() != v2.getZ())
 			return false;
 		return true;
+	}
+	
+	public static Vector convertWorldspaceToPortalVelocity(Vector xDir_Portal, Vector yDir_Portal, Vector zDir_Portal, Vector velocity_Worldspace) {
+        /*
+         * Portal Basis Vectors
+         * | a d h |
+         * | b f j |
+         * | c g k |
+         *
+         * Velocity Worldspace
+         * | x |
+         * | y |
+         * | z |
+         *
+         * Velocity Portal
+         * | x_Portal |
+         * | y_Portal |
+         * | z_Portal |
+         *
+         * Equation Reverse Engineered For Hardcoded Derivation
+         * | a d h | | x_Portal |   | x |
+         * | b f j | | y_Portal | = | y |
+         * | c g k | | z_Portal |   | z |
+         */
+        double a = xDir_Portal.getX();
+        double b = xDir_Portal.getY();
+        double c = xDir_Portal.getZ();
+        double d = yDir_Portal.getX();
+        double f = yDir_Portal.getY();
+        double g = yDir_Portal.getZ();
+        double h = zDir_Portal.getX();
+        double j = zDir_Portal.getY();
+        double k = zDir_Portal.getZ();
+        double x = velocity_Worldspace.getX();
+        double y = velocity_Worldspace.getY();
+        double z = velocity_Worldspace.getZ();
+        
+        //All of these equations were pre-derived using WolframAlpha and solving for the three equation system
+        // obtained by doing [Portal Basis Vectors]*[Portal Velocity] = [Worldspace Velocity]
+        // in terms of the Portal Velocity components, aka x_Portal/y_Portal/z_Portal.
+        double sharedDenominator = -a*(f*k-g*j) + b*(d*k-g*h) - c*(d*j-f*h);
+        double x_Portal = -(d*(j*z-k*y) - f*(h*z-k*x) + g*(h*y-j*x)) / sharedDenominator;
+        double y_Portal = -(-a*(j*z-k*y) + b*(h*z-k*x) - c*(h*y-j*x)) / sharedDenominator;
+        double z_Portal = -(a*(f*z-g*y) - b*(d*z-g*x) + c*(d*y-f*x)) / sharedDenominator;
+        return new Vector(x_Portal, y_Portal, z_Portal);
+    }
+	
+	public static Vector convertPortalToWorldspaceVelocity(Vector xDir_Portal, Vector yDir_Portal, Vector zDir_Portal, Vector velocity_Portal) {
+		/*
+         * Portal Basis Vectors
+         * | a d h |
+         * | b f j |
+         * | c g k |
+         *
+         * Velocity Portal
+         * | l |
+         * | m |
+         * | n |
+         *
+         * Velocity Worldspace
+         * | x_Worldspace |
+         * | y_Worldspace |
+         * | z_Worldspace |
+         *
+         * Equation Derivation
+         * | a d h | | l |   | x_Worldspace |   | a*l + d*m + h*n |
+         * | b f j | | m | = | y_Worldspace | = | b*l + f*m + j*n |
+         * | c g k | | n |   | z_Worldspace |   | c*l + g*m + k*n |
+         */
+		double a = xDir_Portal.getX();
+        double b = xDir_Portal.getY();
+        double c = xDir_Portal.getZ();
+        double d = yDir_Portal.getX();
+        double f = yDir_Portal.getY();
+        double g = yDir_Portal.getZ();
+        double h = zDir_Portal.getX();
+        double j = zDir_Portal.getY();
+        double k = zDir_Portal.getZ();
+        double l = velocity_Portal.getX();
+        double m = velocity_Portal.getY();
+        double n = velocity_Portal.getZ();
+        
+        double x_Worldspace = a*l + d*m + h*n;
+        double y_Worldspace = b*l + f*m + j*n;
+        double z_Worldspace = c*l + g*m + k*n;
+        return new Vector(x_Worldspace,y_Worldspace,z_Worldspace);
+    }
+	
+	public static double getPortalYaw_Rad(Vector normal) {
+		/*
+		 * This function will be used to adjust the player's yaw when they traverse through portals. By knowing the "yaw" of the normal of the "from"
+		 * portal relative to some constant vector, and knowing the "yaw" of the normal of the "to" portal relative to that same constant vector, we
+		 * can get the delta or difference in angle from one portal to another. Then we simply apply that same delta to the player, without any
+		 * mathematical calculation or consideration being made to what angle the player is actually looking or will be looking. Kinda TMI but the
+		 * "constant vector" must lay on the yaw plane of the character aka the X-Z plane. It can't just be ANY vector in 3d space, at least not the
+		 * way I'm going about doing the calculations.
+		 */
+		
+		//Define constant vector
+		Vector zeroDegreeUnitVector = new Vector(0,0,1);
+		
+		//Decompose all components into individual variables for more legible function expression
+		double a = zeroDegreeUnitVector.getX();
+		double b = zeroDegreeUnitVector.getY();
+		double c = zeroDegreeUnitVector.getZ();
+		double d = normal.getX();
+		double f = normal.getY();
+		double g = normal.getZ();
+		
+		//Calculate angle
+		/*
+		 * Starting Equation: u dot v = |u||v|cos(theta)
+		 * Expanded Equation: a*d + b*f + c*g = sqrt(a^2+b^2+c^2)*sqrt(d^2+f^2+g^2)*cos(theta)
+		 * We want to solve for theta: (a*d + b*f + c*g) / (sqrt(a^2+b^2+c^2)*sqrt(d^2+f^2+g^2)) = cos(theta)
+		 * We could use the function like this, but computers don't like square roots. They prefer squaring. So this will take some manipulation
+		 * (I don't even know if this is helpful because we still have an acos computation but whatever)
+		 * Get rid of sqrt by squaring: (a*d+b*f+c*g)^2/((a^2+b^2+c^2) * (d^2+f^2+g^2)) = cos^2(theta)
+		 * Note Trig Half Angle Identity: cos^2(theta) = (1+cos(2*theta))/2
+		 * Implement: (a*d+b*f+c*g)^2/((a^2+b^2+c^2) * (d^2+f^2+g^2)) = (1+cos(2*theta))/2
+		 * Move stuff until theta is alone:
+		 * 		2*(a*d+b*f+c*g)^2/((a^2+b^2+c^2) * (d^2+f^2+g^2)) = 1+cos(2*theta)
+		 * 		[2*(a*d+b*f+c*g)^2/((a^2+b^2+c^2) * (d^2+f^2+g^2))] - 1 = cos(2*theta)
+		 * 		acos([2*(a*d+b*f+c*g)^2/((a^2+b^2+c^2) * (d^2+f^2+g^2))] - 1) = 2*theta
+		 * 		acos([2*(a*d+b*f+c*g)^2/((a^2+b^2+c^2) * (d^2+f^2+g^2))] - 1) / 2 = theta
+		 *
+		 * EDIT: I'm leaving all these comments in as they show my thought process, but I have a correction. Running the derived equation above
+		 * which avoids using sqrt actually takes ~90x longer than the shorter version on my test machine so whatever. I'm sticking with the shorter
+		 * version I suppose. Facts are facts.
+		 */
+//		double theta_badWay = Math.acos((2*Math.pow(a*d+b*f+c*g, 2)/((a*a+b*b+c*c) * (d*d+f*f+g*g))) - 1) / 2d;
+		return Math.acos((a*d + b*f + c*g) / (Math.sqrt(a*a+b*b+c*c)*Math.sqrt(d*d+f*f+g*g)));
 	}
 	
 	public boolean inEllipse_BROKENFUNCTION(Location loc) {
