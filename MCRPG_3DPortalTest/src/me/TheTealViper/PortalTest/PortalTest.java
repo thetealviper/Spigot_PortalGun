@@ -20,6 +20,7 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
@@ -223,13 +224,13 @@ public class PortalTest extends JavaPlugin implements Listener {
 										normal = new Vector(1,0,0);
 										break;
 									case SOUTH:
-										normal = new Vector(0,0,-1);
+										normal = new Vector(0,0,1);
 										break;
 									case WEST:
 										normal = new Vector(-1,0,0);
 										break;
 									case NORTH:
-										normal = new Vector(0,0,1);
+										normal = new Vector(0,0,-1);
 										break;
 									default:
 										break;
@@ -280,13 +281,13 @@ public class PortalTest extends JavaPlugin implements Listener {
 										normal = new Vector(1,0,0);
 										break;
 									case SOUTH:
-										normal = new Vector(0,0,-1);
+										normal = new Vector(0,0,1);
 										break;
 									case WEST:
 										normal = new Vector(-1,0,0);
 										break;
 									case NORTH:
-										normal = new Vector(0,0,1);
+										normal = new Vector(0,0,-1);
 										break;
 									default:
 										break;
@@ -430,6 +431,17 @@ public class PortalTest extends JavaPlugin implements Listener {
 					e.setDamage(0);
 				}
 			}
+		}
+	}
+	
+	@EventHandler
+	public void onPlayerDropItem(PlayerDropItemEvent e) {
+		ItemStack item = e.getItemDrop().getItemStack();
+		if(item.hasItemMeta() && item.getItemMeta().hasCustomModelData() && item.getItemMeta().getCustomModelData() == 9999999) {
+			if(leftPortalMap.containsKey(e.getPlayer()))
+				leftPortalMap.remove(e.getPlayer());
+			if(rightPortalMap.containsKey(e.getPlayer()))
+				rightPortalMap.remove(e.getPlayer());
 		}
 	}
 	
