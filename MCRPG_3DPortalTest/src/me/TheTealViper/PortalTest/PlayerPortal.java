@@ -23,7 +23,8 @@ public class PlayerPortal {
 	public Location center;
 	/*
 	 * This is the player who owns the portal. This can have many utilities in an actual application
-	 * of this plugin
+	 * of this plugin. It is currently used to link two portals. Anyone can use anyone's portal, the
+	 * owner just links right/left/blue/orange.
 	 */
 	public Player p;
 	/*
@@ -113,10 +114,9 @@ public class PlayerPortal {
 		}
 		Location loc = to.center.clone().add(to.normal.clone().multiply(multiplier)).add(0, eyelineOffset, 0);
 		//Yaw Correction
-		//We convert ONCE from rad to deg here instead of twice within the getPortalYaw function.
-		// Also Math.PI is a double so we save the float cast until this step or we'd just do it multiple times for nothing.
+		// Math.PI is a double so we save the float cast until this step or we'd just do it multiple times for nothing.
 		// Also we add 180 because we want to come out the OPPOSITE direction faced when going in.
-		float yawDelta = (float) ((getPortalYaw_Rad(to.normal) - getPortalYaw_Rad(from.normal)) * 180f / Math.PI);
+		float yawDelta = (float) (getPortalsYawDelta_Rad(from.normal.clone(), to.normal.clone()) * (180f / Math.PI)) + 180f;
 		//If either portal is facing upwards or downwards, then we no longer care to rotate the player's yaw
 		if(vectorsEqual(from.normal, new Vector(0,1,0)) || vectorsEqual(from.normal, new Vector(0,-1,0)) || vectorsEqual(to.normal, new Vector(0,1,0)) || vectorsEqual(to.normal, new Vector(0,-1,0)))
 			yawDelta = 0f;
@@ -237,28 +237,17 @@ public class PlayerPortal {
         return new Vector(x_Worldspace,y_Worldspace,z_Worldspace);
     }
 	
-	public static double getPortalYaw_Rad(Vector normal) {
-		/*
-		 * This function will be used to adjust the player's yaw when they traverse through portals. By knowing the "yaw" of the normal of the "from"
-		 * portal relative to some constant vector, and knowing the "yaw" of the normal of the "to" portal relative to that same constant vector, we
-		 * can get the delta or difference in angle from one portal to another. Then we simply apply that same delta to the player, without any
-		 * mathematical calculation or consideration being made to what angle the player is actually looking or will be looking. Kinda TMI but the
-		 * "constant vector" must lay on the yaw plane of the character aka the X-Z plane. It can't just be ANY vector in 3d space, at least not the
-		 * way I'm going about doing the calculations.
-		 */
-		
-		//Define constant vector
-		Vector zeroDegreeUnitVector = new Vector(0,0,1);
+	public static double getPortalsYawDelta_Rad(Vector fromPortalNormal, Vector toPortalNormal) {
 		
 		//Decompose all components into individual variables for more legible function expression
-		double a = zeroDegreeUnitVector.getX();
-		double b = zeroDegreeUnitVector.getY();
-		double c = zeroDegreeUnitVector.getZ();
-		double d = normal.getX();
-		double f = normal.getY();
-		double g = normal.getZ();
+		double a = fromPortalNormal.getX();
+		double b = fromPortalNormal.getY();
+		double c = fromPortalNormal.getZ();
+		double d = toPortalNormal.getX();
+		double f = toPortalNormal.getY();
+		double g = toPortalNormal.getZ();
 		
-		//Calculate angle
+		//Calculate absolute value of angle
 		/*
 		 * Starting Equation: u dot v = |u||v|cos(theta)
 		 * Expanded Equation: a*d + b*f + c*g = sqrt(a^2+b^2+c^2)*sqrt(d^2+f^2+g^2)*cos(theta)
@@ -279,7 +268,16 @@ public class PlayerPortal {
 		 * version I suppose. Facts are facts.
 		 */
 //		double theta_badWay = Math.acos((2*Math.pow(a*d+b*f+c*g, 2)/((a*a+b*b+c*c) * (d*d+f*f+g*g))) - 1) / 2d;
-		return Math.acos((a*d + b*f + c*g) / (Math.sqrt(a*a+b*b+c*c)*Math.sqrt(d*d+f*f+g*g)));
+		double thetaAbs = Math.abs(Math.acos((a*d + b*f + c*g) / (Math.sqrt(a*a+b*b+c*c)*Math.sqrt(d*d+f*f+g*g))));
+		
+		//Detect if angle delta is clockwise (therefore +) or counter-clockwise (therefore -)
+		//We do this by calculating the cross product and knowing what the output vector's y component aligns with
+		// NOTE: This is only possible because we assume this function is only pertinent for VERTICAL portals which
+		// we implemented to ONLY function with normals within the X-Z plane. So the y component will always indicate
+		// cw or ccw rotation.
+		Vector crossProduct = fromPortalNormal.crossProduct(toPortalNormal);
+		double thetaWithSign = crossProduct.getY() < 0 ? thetaAbs : -thetaAbs; //This is true by nature of the assumptions we made for our system
+		return thetaWithSign;
 	}
 	
 	public boolean inEllipse_BROKENFUNCTION(Location loc) {
@@ -360,9 +358,10 @@ public class PlayerPortal {
 			double denominator2 = Math.pow(PortalTest.DEFAULT_X_RADIUS, 2);
 			
 			if(numerator1 / denominator1 + numerator2 / denominator2 <= 1) {
-				if(Math.abs(distanceFromCenterInDirection3AkaPortalZ) < .2d) //Now we know it is contained within the loop but how far away from the loop is it
+				//Now we know it is contained within the loop but how far away from the loop is it
+				if(Math.abs(distanceFromCenterInDirection3AkaPortalZ) < .2d) {
 					return true;
-				else
+				} else
 					return false;
 			} else
 				return false;

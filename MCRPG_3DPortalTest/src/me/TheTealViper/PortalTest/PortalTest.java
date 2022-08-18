@@ -209,6 +209,9 @@ public class PortalTest extends JavaPlugin implements Listener {
 							Vector facing = e.getPlayer().getLocation().getDirection().clone();
 							Vector shift = new Vector(facing.getX() * raycastIncrement * i, facing.getY() * raycastIncrement * i, facing.getZ() * raycastIncrement * i);
 							Location loc = e.getPlayer().getEyeLocation().clone().add(shift);
+							//This next line does NOT allow our hit detection to account for non-primitive 1x1 blocks.
+							//For example, half slabs and stairs will trigger a "hit" even if the raycast is hovering a space which is physically air
+							// because that air is located within the 1x1 block which identifies as slabs or stairs.
 							if(!loc.getBlock().getType().equals(Material.AIR)) {
 								BlockFace face = loc.getBlock().getFace(lastLocation.getBlock());
 								if(face != null) {
@@ -329,9 +332,7 @@ public class PortalTest extends JavaPlugin implements Listener {
 				e.getPlayer().getWorld().dropItem(e.getPlayer().getLocation(), item);
 			}}, 1);
 		}
-		if(e.getMessage().equals("f")) {
-			PlayerPortal.debugRaycast(velocity.clone(), e.getPlayer().getLocation());
-		}
+		
 	}
 
 	@EventHandler
@@ -351,13 +352,16 @@ public class PortalTest extends JavaPlugin implements Listener {
 		 * and we are checking your feetsies, they actually won't be in the portal which is on the wall as you can't walk that close to walls.
 		 * Your player model stops you.
 		 */
-		
+
 		if(!cooldownMap.containsKey(e.getPlayer()))
 			cooldownMap.put(e.getPlayer(), 0L);
 		
 		if(System.currentTimeMillis() - cooldownMap.get(e.getPlayer()) <= tpCooldown)
 			return;
 		
+		//We multiply this number (x1.3) arbitrarily because the portal is located ON a wall, but the player can never truly "touch" the wall
+		// so we need to magnify the velocity semi-arbitrarily until a normal walking speed stretches the raycasted distance enough to
+		// intercept the portal. Trial and error kinda thing
 		velocity = e.getTo().clone().subtract(e.getFrom().clone()).toVector().multiply(1.3);
 		if(e.getPlayer().isOnGround()) {
 			if(pendingCancelDamage.contains(e.getPlayer()))
@@ -367,11 +371,13 @@ public class PortalTest extends JavaPlugin implements Listener {
 		
 		PlayerPortal usedPortal = null;
 		for(PlayerPortal pp : leftPortalMap.values()) {
-			if(e.getFrom().distanceSquared(pp.center) == 0) {
-				continue;
-			}
+			// I updated the teleport code to NOT simply teleport the player to the center of the portal because that made them float so this code is useless now. Could be re-implemented properly but I'm lazy. TODO
+//			if(e.getFrom().distanceSquared(pp.center) == 0) {
+//				continue;
+//			}
 			
-			if(pp.inEllipse(velocity.clone(), e.getPlayer().getLocation()) || pp.inEllipse(velocity.clone(), e.getPlayer().getLocation().add(0, .5, 0).add(e.getPlayer().getLocation().getDirection().clone().setY(0).multiply(.4)))) {
+			//Check if body is in vertical portal or if head is in horizontal portal
+			if(pp.inEllipse(velocity.clone(), e.getTo().clone()) || pp.inEllipse(velocity.clone(), e.getTo().clone().add(0, e.getPlayer().getEyeHeight(), 0))) {
 				usedPortal = pp;
 				
 				Player portalOwner = usedPortal.p;
@@ -387,11 +393,12 @@ public class PortalTest extends JavaPlugin implements Listener {
 		
 		if(usedPortal == null) {
 			for(PlayerPortal pp : rightPortalMap.values()) {
-				if(e.getFrom().distanceSquared(pp.center) == 0) {
-					continue;
-				}
+				// I updated the teleport code to NOT simply teleport the player to the center of the portal because that made them float so this code is useless now. Could be re-implemented properly but I'm lazy. TODO
+//				if(e.getFrom().distanceSquared(pp.center) == 0) {
+//					continue;
+//				}
 				
-				if(pp.inEllipse(velocity.clone(), e.getPlayer().getLocation()) || pp.inEllipse(velocity.clone(), e.getPlayer().getLocation().add(0, .5, 0).add(e.getPlayer().getLocation().getDirection().clone().setY(0).multiply(.4)))) {
+				if(pp.inEllipse(velocity.clone(), e.getTo().clone()) || pp.inEllipse(velocity.clone(), e.getTo().clone().add(0, e.getPlayer().getEyeHeight(), 0))) {
 					usedPortal = pp;
 					
 					Player portalOwner = usedPortal.p;
