@@ -14,7 +14,7 @@ import org.bukkit.util.Vector;
 public class PlayerPortal {
 	/*
 	 * Some may say hey Aaron isn't the normal vector the same as zDir to which I say
-	 * shutthefuckupletmedomything
+	 * [Redacted Bad Word For Professionalism]
 	 */
 	public Vector normal;
 	/*
